@@ -111,6 +111,19 @@ public class Cluster implements Closeable {
              initializer.getInitialListeners());
     }
 
+    /**
+     * Constructs a new Cluster instance.
+     * <p>
+     * This constructor is exposed for subclasses that wish to bypass the whole initialization logic.
+     * This is typically useful for wrappers that delegate method calls to another implementation.
+     * <p>
+     * Such subclasses <b>MUST</b> override all public instance methods, to make sure that manager is
+     * never dereferenced.
+     */
+    protected Cluster() {
+        this.manager = null;
+    }
+
     private static List<InetSocketAddress> checkNotEmpty(List<InetSocketAddress> contactPoints) {
         if (contactPoints.isEmpty())
             throw new IllegalArgumentException("Cannot build a cluster without contact points");
@@ -154,6 +167,11 @@ public class Cluster implements Closeable {
      * Cluster.
      */
     public Cluster init() {
+        if (this.manager == null)
+            throw new IllegalStateException(
+                "Internal manager is null, it appears that you've extended Cluster and used it no-arg constructor. "
+                    + "You must override all public instance methods, refer to the API doc.");
+
         this.manager.init();
         return this;
     }
