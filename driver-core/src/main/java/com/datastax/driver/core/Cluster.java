@@ -111,6 +111,20 @@ public class Cluster implements Closeable {
              initializer.getInitialListeners());
     }
 
+    /**
+     * Cleans up internal state used by this instance.
+     * <p>
+     * This method is intended for subclasses that act as a delegate for another Cluster instance.
+     * Calling it is not mandatory, but it ensures that all future calls to the public methods of
+     * this instance fail, and therefore that the subclass properly intercepts all public calls and
+     * forwards them to the delegate.
+     * <p>
+     * This method should be called early on (for instance in the subclass's constructor).
+     */
+    protected void closeInternal() {
+        this.manager.close();
+    }
+
     private static List<InetSocketAddress> checkNotEmpty(List<InetSocketAddress> contactPoints) {
         if (contactPoints.isEmpty())
             throw new IllegalArgumentException("Cannot build a cluster without contact points");
@@ -218,6 +232,8 @@ public class Cluster implements Closeable {
      * @return a new, non-initialized session on this cluster.
      */
     public Session newSession() {
+        checkNotClosed(manager);
+
         return manager.newSession();
     }
 
@@ -242,6 +258,10 @@ public class Cluster implements Closeable {
      * Cluster.
      */
     public Session connect() {
+        // This check protects against subclasses that called closeInternal(), overrode
+        // init but forgot to override connect.
+        checkNotClosed(manager);
+
         init();
         Session session = manager.newSession();
         session.init();
@@ -351,6 +371,7 @@ public class Cluster implements Closeable {
      * returns {@code null}).
      */
     public Metrics getMetrics() {
+        checkNotClosed(manager);
         return manager.metrics;
     }
 
@@ -369,6 +390,7 @@ public class Cluster implements Closeable {
      * @return this {@code Cluster} object;
      */
     public Cluster register(Host.StateListener listener) {
+        checkNotClosed(manager);
         manager.listeners.add(listener);
         return this;
     }
@@ -383,6 +405,7 @@ public class Cluster implements Closeable {
      * @return this {@code Cluster} object;
      */
     public Cluster unregister(Host.StateListener listener) {
+        checkNotClosed(manager);
         manager.listeners.remove(listener);
         return this;
     }
@@ -407,6 +430,7 @@ public class Cluster implements Closeable {
      * @return this {@code Cluster} object;
      */
     public Cluster register(LatencyTracker tracker) {
+        checkNotClosed(manager);
         manager.trackers.add(tracker);
         return this;
     }
@@ -422,6 +446,7 @@ public class Cluster implements Closeable {
      * @return this {@code Cluster} object;
      */
     public Cluster unregister(LatencyTracker tracker) {
+        checkNotClosed(manager);
         manager.trackers.remove(tracker);
         return this;
     }
@@ -478,6 +503,11 @@ public class Cluster implements Closeable {
      */
     public boolean isClosed() {
         return manager.closeFuture.get() != null;
+    }
+
+    private void checkNotClosed(Manager manager) {
+        if (manager.isClosed())
+            throw new IllegalStateException("Can't use this Cluster instance because it was previously closed");
     }
 
     /**
@@ -1110,27 +1140,25 @@ public class Cluster implements Closeable {
         final List<InetSocketAddress> contactPoints;
         final Set<SessionManager> sessions = new CopyOnWriteArraySet<SessionManager>();
 
-        final Metadata metadata;
+        Metadata metadata;
         final Configuration configuration;
-        final Metrics metrics;
+        Metrics metrics;
 
-        final Connection.Factory connectionFactory;
-        final ControlConnection controlConnection;
+        Connection.Factory connectionFactory;
+        ControlConnection controlConnection;
 
         final ConvictionPolicy.Factory convictionPolicyFactory = new ConvictionPolicy.Simple.Factory();
 
-        final ScheduledExecutorService reconnectionExecutor = Executors.newScheduledThreadPool(2, threadFactory("Reconnection-%d"));
-        // scheduledTasksExecutor is used to process C* notifications. So having it mono-threaded ensures notifications are
-        // applied in the order received.
-        final ScheduledExecutorService scheduledTasksExecutor = Executors.newScheduledThreadPool(1, threadFactory("Scheduled Tasks-%d"));
+        ScheduledExecutorService reconnectionExecutor;
+        ScheduledExecutorService scheduledTasksExecutor;
 
         // Executor used for tasks that shouldn't be executed on an IO thread. Used for short-lived, generally non-blocking tasks
-        final ListeningExecutorService executor;
+        ListeningExecutorService executor;
 
         // An executor for tasks that might block some time, like creating new connection, but are generally not too critical.
-        final ListeningExecutorService blockingExecutor;
+        ListeningExecutorService blockingExecutor;
 
-        final ConnectionReaper reaper;
+        ConnectionReaper reaper;
 
         final AtomicReference<CloseFuture> closeFuture = new AtomicReference<CloseFuture>();
 
@@ -1144,34 +1172,36 @@ public class Cluster implements Closeable {
         final Set<LatencyTracker> trackers = new CopyOnWriteArraySet<LatencyTracker>();
 
         private Manager(String clusterName, List<InetSocketAddress> contactPoints, Configuration configuration, Collection<Host.StateListener> listeners) {
-            logger.debug("Starting new cluster with contact points " + contactPoints);
-
             this.clusterName = clusterName == null ? generateClusterName() : clusterName;
             this.configuration = configuration;
-            this.configuration.register(this);
-
-            this.executor = makeExecutor(NON_BLOCKING_EXECUTOR_SIZE, "Cassandra Java Driver worker-%d");
-            this.blockingExecutor = makeExecutor(2, "Cassandra Java Driver blocking tasks worker-%d");
-
-            this.reaper = new ConnectionReaper();
-
-            this.metadata = new Metadata(this);
             this.contactPoints = contactPoints;
-            this.connectionFactory = new Connection.Factory(this, configuration);
-            this.controlConnection = new ControlConnection(this);
-
-            this.metrics = configuration.getMetricsOptions() == null ? null : new Metrics(this);
             this.listeners = new CopyOnWriteArraySet<Host.StateListener>(listeners);
         }
 
         // Initialization is not too performance intensive and in practice there shouldn't be contention
         // on it so synchronized is good enough.
         synchronized void init() {
-            if (isClosed())
-                throw new IllegalStateException("Can't use this Cluster instance because it was previously closed");
+            checkNotClosed(this);
             if (isInit)
                 return;
             isInit = true;
+
+            logger.debug("Starting new cluster with contact points " + contactPoints);
+
+            this.configuration.register(this);
+
+            this.executor = makeExecutor(NON_BLOCKING_EXECUTOR_SIZE, "Cassandra Java Driver worker-%d");
+            this.blockingExecutor = makeExecutor(2, "Cassandra Java Driver blocking tasks worker-%d");
+            this.reconnectionExecutor = Executors.newScheduledThreadPool(2, threadFactory("Reconnection-%d"));
+            // scheduledTasksExecutor is used to process C* notifications. So having it mono-threaded ensures notifications are
+            // applied in the order received.
+            this.scheduledTasksExecutor = Executors.newScheduledThreadPool(1, threadFactory("Scheduled Tasks-%d"));
+
+            this.reaper = new ConnectionReaper();
+            this.metadata = new Metadata(this);
+            this.connectionFactory = new Connection.Factory(this, configuration);
+            this.controlConnection = new ControlConnection(this);
+            this.metrics = configuration.getMetricsOptions() == null ? null : new Metrics(this);
 
             for (InetSocketAddress address : contactPoints) {
                 // We don't want to signal -- call onAdd() -- because nothing is ready
@@ -1296,39 +1326,43 @@ public class Cluster implements Closeable {
             if (future != null)
                 return future;
 
-            logger.debug("Shutting down");
+            if (isInit) {
+                logger.debug("Shutting down");
 
-            // If we're shutting down, there is no point in waiting on scheduled reconnections, nor on notifications
-            // delivery or blocking tasks so we use shutdownNow
-            shutdownNow(reconnectionExecutor);
-            shutdownNow(scheduledTasksExecutor);
-            shutdownNow(blockingExecutor);
+                // If we're shutting down, there is no point in waiting on scheduled reconnections, nor on notifications
+                // delivery or blocking tasks so we use shutdownNow
+                shutdownNow(reconnectionExecutor);
+                shutdownNow(scheduledTasksExecutor);
+                shutdownNow(blockingExecutor);
 
-            // but for the worker executor, we want to let submitted tasks finish unless the shutdown is forced.
-            executor.shutdown();
+                // but for the worker executor, we want to let submitted tasks finish unless the shutdown is forced.
+                executor.shutdown();
 
-            // We also close the metrics
-            if (metrics != null)
-                metrics.shutdown();
+                // We also close the metrics
+                if (metrics != null)
+                    metrics.shutdown();
 
-            // And the load balancing policy
-            LoadBalancingPolicy loadBalancingPolicy = loadBalancingPolicy();
-            if (loadBalancingPolicy instanceof CloseableLoadBalancingPolicy)
-                ((CloseableLoadBalancingPolicy)loadBalancingPolicy).close();
+                // And the load balancing policy
+                LoadBalancingPolicy loadBalancingPolicy = loadBalancingPolicy();
+                if (loadBalancingPolicy instanceof CloseableLoadBalancingPolicy)
+                    ((CloseableLoadBalancingPolicy)loadBalancingPolicy).close();
 
-            AddressTranslater translater = configuration.getPolicies().getAddressTranslater();
-            if (translater instanceof CloseableAddressTranslater)
-                ((CloseableAddressTranslater)translater).close();
+                AddressTranslater translater = configuration.getPolicies().getAddressTranslater();
+                if (translater instanceof CloseableAddressTranslater)
+                    ((CloseableAddressTranslater)translater).close();
 
-            // Then we shutdown all connections
-            List<CloseFuture> futures = new ArrayList<CloseFuture>(sessions.size() + 1);
-            futures.add(controlConnection.closeAsync());
-            for (Session session : sessions)
-                futures.add(session.closeAsync());
+                // Then we shutdown all connections
+                List<CloseFuture> futures = new ArrayList<CloseFuture>(sessions.size() + 1);
+                futures.add(controlConnection.closeAsync());
+                for (Session session : sessions)
+                    futures.add(session.closeAsync());
 
-            future = new ClusterCloseFuture(futures);
+                future = new ClusterCloseFuture(futures);
+                // The rest will happen asynchronously, when all connections are successfully closed
+            } else {
+                future = CloseFuture.immediateFuture();
+            }
 
-            // The rest will happen asynchronously, when all connections are successfully closed
             return closeFuture.compareAndSet(null, future)
                  ? future
                  : closeFuture.get(); // We raced, it's ok, return the future that was actually set
