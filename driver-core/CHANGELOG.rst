@@ -5,7 +5,6 @@ CHANGELOG
 -------
 
 - [new feature] Add AddressTranslater for EC2 multi-region deployment (JAVA-518)
-- [improvement] Allow Cluster subclasses to bypass manager initialization (JAVA-619)
 
 2.0.9:
 ------
