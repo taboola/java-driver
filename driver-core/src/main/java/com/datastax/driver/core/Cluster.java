@@ -111,20 +111,6 @@ public class Cluster implements Closeable {
              initializer.getInitialListeners());
     }
 
-    /**
-     * Cleans up internal state used by this instance.
-     * <p>
-     * This method is intended for subclasses that act as a delegate for another Cluster instance.
-     * Calling it is not mandatory, but it ensures that all future calls to the public methods of
-     * this instance fail, and therefore that the subclass properly intercepts all public calls and
-     * forwards them to the delegate.
-     * <p>
-     * This method should be called early on (for instance in the subclass's constructor).
-     */
-    protected void closeInternal() {
-        this.manager.close();
-    }
-
     private static List<InetSocketAddress> checkNotEmpty(List<InetSocketAddress> contactPoints) {
         if (contactPoints.isEmpty())
             throw new IllegalArgumentException("Cannot build a cluster without contact points");
