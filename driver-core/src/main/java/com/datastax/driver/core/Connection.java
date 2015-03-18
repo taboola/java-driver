@@ -92,7 +92,7 @@ class Connection {
             ClientBootstrap bootstrap = factory.newBootstrap();
             ProtocolOptions protocolOptions = factory.configuration.getProtocolOptions();
             int protocolVersion = factory.protocolVersion == 1 ? 1 : 2;
-            bootstrap.setPipelineFactory(new PipelineFactory(this, protocolVersion, protocolOptions.getCompression().compressor, protocolOptions.getSSLOptions(),
+            bootstrap.setPipelineFactory(new PipelineFactory(this, protocolVersion, protocolOptions.getCompression().compressor(), protocolOptions.getSSLOptions(),
                 factory.configuration.getPoolingOptions().getHeartbeatIntervalSeconds(), factory.timer));
 
             ChannelFuture future = bootstrap.connect(address);
