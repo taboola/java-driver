@@ -21,6 +21,8 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import com.google.common.collect.Lists;
+
 import com.datastax.driver.core.exceptions.InvalidTypeException;
 
 /**
@@ -37,6 +39,11 @@ import com.datastax.driver.core.exceptions.InvalidTypeException;
  * variables for that name.
  * <p>
  * Any variable that hasn't been specifically set will be considered {@code null}.
+ * <p>
+ * Bound values may also be retrieved using {@code get*()} methods. Note that this
+ * may have a non-negligible impact on performance: internally, values are stored
+ * in serialized form, so they need to be deserialized again. These methods are
+ * provided for debugging purposes.
  */
 public class BoundStatement extends Statement implements GettableData {
 
@@ -1278,6 +1285,29 @@ public class BoundStatement extends Statement implements GettableData {
     @Override
     public <K, V> Map<K, V> getMap(String name, Class<K> keysClass, Class<V> valuesClass) {
         return wrapper.getMap(name, keysClass, valuesClass);
+    }
+
+    /**
+     * Returns all the values bound for this statement.
+     * <p>
+     * Note that this method may have a non-negligible impact on performance: internally, values
+     * are stored in serialized form, so they need to be deserialized one by one. This method is
+     * provided for debugging purposes.
+     *
+     * @return the values, in the order in which they appear in the statement. Any unset value
+     * will be returned as {@code null}.
+     */
+    public List<Object> getValues() {
+        List<Object> result = Lists.newArrayListWithCapacity(values.length);
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == null)
+                result.add(null);
+            else {
+                DataType type = metadata().getType(i);
+                result.add(type.deserialize(values[i]));
+            }
+        }
+        return result;
     }
 
     private ColumnDefinitions metadata() {
