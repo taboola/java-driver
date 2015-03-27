@@ -21,8 +21,6 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import com.google.common.collect.Lists;
-
 import com.datastax.driver.core.exceptions.InvalidTypeException;
 
 /**
@@ -1287,27 +1285,14 @@ public class BoundStatement extends Statement implements GettableData {
         return wrapper.getMap(name, keysClass, valuesClass);
     }
 
-    /**
-     * Returns all the values bound for this statement.
-     * <p>
-     * Note that this method may have a non-negligible impact on performance: internally, values
-     * are stored in serialized form, so they need to be deserialized one by one. This method is
-     * provided for debugging purposes.
-     *
-     * @return the values, in the order in which they appear in the statement. Any unset value
-     * will be returned as {@code null}.
-     */
-    public List<Object> getValues() {
-        List<Object> result = Lists.newArrayListWithCapacity(values.length);
-        for (int i = 0; i < values.length; i++) {
-            if (values[i] == null)
-                result.add(null);
-            else {
-                DataType type = metadata().getType(i);
-                result.add(type.deserialize(values[i]));
-            }
-        }
-        return result;
+    @Override
+    public Object getObject(int i) {
+        return wrapper.getObject(i);
+    }
+
+    @Override
+    public Object getObject(String name) {
+        return wrapper.getObject(name);
     }
 
     private ColumnDefinitions metadata() {

@@ -115,6 +115,9 @@ public class DataTypeIntegrationTest extends CCMBridge.PerClassSingleNodeCluster
     private void checkGetterReturnsBoundValue(BoundStatement bs, TestTable table) {
         Object getterResult = getBoundValue(bs, table.testColumnType);
         assertThat(getterResult).isEqualTo(table.sampleValue);
+
+        // Ensure that bs.getObject() also returns the expected value.
+        assertThat(bs.getObject(0)).isEqualTo(table.sampleValue);
     }
 
     /**

@@ -288,4 +288,27 @@ abstract class AbstractGettableData implements GettableData {
     public <K, V> Map<K, V> getMap(String name, Class<K> keysClass, Class<V> valuesClass) {
         return getMap(metadata.getFirstIdx(name), keysClass, valuesClass);
     }
+
+    public Object getObject(int i) {
+        ByteBuffer raw = getValue(i);
+        DataType type = metadata.getType(i);
+        if (raw == null)
+            switch (type.getName()) {
+                case LIST:
+                    return Collections.emptyList();
+                case SET:
+                    return Collections.emptySet();
+                case MAP:
+                    return Collections.emptyMap();
+                default:
+                    return null;
+            }
+        else
+            return type.deserialize(raw);
+    }
+
+    public Object getObject(String name) {
+        return getValue(metadata.getFirstIdx(name));
+    }
+
 }
